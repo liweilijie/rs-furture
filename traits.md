@@ -4,6 +4,8 @@
 ## Deref && DerefMut
 实现 `Deref trait`允许我们重载 解引用运算符（dereference operator）*（与乘法运算符或通配符相区别）。
 
+看这个文档比较清晰[通过 Deref trait 将智能指针当作常规引用处理](https://kaisery.github.io/trpl-zh-cn/ch15-02-deref.html)
+
 ```rust
 use std::ops::Deref;
 
