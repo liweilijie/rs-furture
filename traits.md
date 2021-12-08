@@ -40,7 +40,36 @@ Rust 在发现类型和 Trait 实现满足三种情况时会进行 Deref 强制�
 - 当 `T: DerefMut<Target=U>` 时从`&mut T` 到 `&mut U`
 - 当 `T: Deref<Target=U>` 时从`&mut T` 到`&U`
 
-## AsRef
+## AsRef && AsMut
+[AsRef 和 AsMut](https://wiki.jikexueyuan.com/project/rust-primer/intoborrow/asref.html)
+
+`std::convert`下面，还有另外两个`Trait`，`AsRef/AsMut`，它们功能是配合泛型，在执行引用操作的时候，进行自动类型转换。这能够使一些场景的代码实现得清晰漂亮，大家方便开发。
+
+`AsRef`提供了一个方法`.as_ref()`。
+
+对于一个类型为`T`的对象`foo`，如果`T`实现了`AsRef<U>`，那么，`foo`可执行`.as_ref()`操作，即`foo.as_ref()`。操作的结果，我们得到了一个类型为`&U`的新引用。
+
+注：
+
+1. 与`Into<T>`不同的是，`AsRef<T>`只是类型转换，`foo`对象本身没有被消耗；
+2. `T: AsRef<U>`中的`T`，可以接受 资源拥有者（owned）类型，共享引用（shared referrence）类型 ，可变引用（mutable referrence）类型。
+
+下面举个简单的例子：
+```rust
+fn is_hello<T: AsRef<str>>(s: T) {
+  assert_eq!("hello", s.as_ref());
+}
+
+fn main() {
+  let s = "hello";
+  is_hello(s);
+
+  let s = "hello".to_string();
+  is_hello(s); 
+}
+```
+**因为 String 和 &str 都实现了 AsRef<str>**
+
 `AsRef`特性是一个转换特性。它用来在泛型中把一些值转换为引用。像这样：
 ```rust
 let s = "hello".to_string();
@@ -50,8 +79,144 @@ fn foo<T: AsRef<str>>(s: T) {
 }
 ```
 
-认真把这篇文章读懂就明白如何使用了[AsRef](https://stackauth.com/auth/oauth2/github?code=4c5e231aa08b991657a5&state=%7B%22sid%22%3A1%2C%22st%22%3A%2259%3A3%3Abbc%2C16%3A49260bdc2d6801b5%2C10%3A1637315039%2C16%3A0f54a230ff1d70be%2C77be37a5c35126a2544a39f79b6287ccb5e26dd5770297c638876edf26dde864%22%2C%22cid%22%3A%2201b478c0264a1fbd7183%22%2C%22k%22%3A%22GitHub%22%2C%22ses%22%3A%22e064074472954fc9b9b7d6ac432fe9ed%22%7D)
+在 stackoverflow 上面有一个示例：
 
+我们需要一个用户成为版主，而且版主有不同的权限，我们可能这样来设计
+```rust
+// 用户信息
+struct User {
+  email: String,
+  age: u8,
+}
+
+enum Privilege {
+  // imagine different moderator privileges here
+  // 想象一下论坛版主有不同的权限在这里
+  Super,
+  Admin,
+}
+
+// 论坛版主
+struct Moderator {
+  user: User,
+  privileges: Vec<Privilege>,
+}
+```
+
+ 现在有点浪费空间, 而且比较笨的一种方式来获取 User 的值.
+
+ ```rust
+ #[derive(Default)]
+ struct User {
+   email: String,
+   age: u8,
+ }
+
+enum Privilege {
+  // imagine different moderator privileges here
+  // 想象一下论坛版主有不同的权限在这里
+  Super,
+  Admin,
+}
+
+#[derive(Default)]
+struct Moderator {
+  user: User,
+  privileges: Vec<Privilege>,
+}
+
+fn takes_user(user: &User) {}
+
+fn main() {
+  let user = User::default();
+  let moderator = Moderator::default();
+
+  takes_user(&user);
+  takes_user(&moderator.user); // 很笨的一种方式
+}
+ ```
+
+ 如果任何期望用`&User`的地方我们也可以通过`&moderator` 调用， 用`AsRef`我们就可以做到，实现如下：
+ ```rust
+ #[derive(Default)]
+ struct User {
+   email: string,
+   age: u8,
+ }
+
+// obviously 显而易见的
+impl AsRef<User> for User {
+  fn as_ref(&self) -> &User {
+    self
+  }
+}
+
+enum Privilege {
+  // imagine different moderator privileges here
+  // 想象一下论坛版主有不同的权限在这里
+  Super,
+  Admin,
+}
+
+#[derive(Default)]
+struct Moderator {
+  user: User,
+  privileges: Vec<Privilege>,
+}
+
+// 因为版主也只是普通的用户而已
+// since moderators are just regular users
+impl AsRef<User> for Moderator {
+  fn as_ref(&self) -> &User {
+    &self.user
+  }
+}
+
+fn takes_user<U: AsRef<User>>(user: U) {}
+
+fn usage_asref() {
+  let user = User::default();
+  let moderator = Moderator::default();
+
+  takes_user(&user);
+  takes_user(&moderator); // yay 哇
+}
+
+// test module
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_asref() {
+        usage_asref();
+    }
+}
+ ```
+现在我们可以通过`&Moderator`到任何函数期望&User 的参数的地方，我们只需要一点代码的重构即可。而且我们也扩张到其他类型，比如`Admin, PowerUser, SubscribedUser`等，他们只需要实现`AsRef<User>`即可工作。
+
+ 从`&Moderator`到`&User`能正常工作的原因是因为实现了：`impl AsRef<User> for &Moderator`
+
+ ```rust
+ impl<T: ?Sized, U: ?Sized> AsRef<U> for &T
+ where
+    T: AsRef<U>,
+{
+  fn as_ref(&self) -> &U {
+    <T as AsRef<U>>::as_ref(*self)
+  }
+}
+ ```
+ > Which basically just says if we have some impl AsRef<U> for T we also automatically get impl AsRef<U> for &T for all T for free.
+
+ 这就是意味着我们有`impl AsRef<U> for T` 我们也自动免费获得`impl AsRef<U> for &T`
+
+### AsMut
+`AsMut<T>`提供了一个方法`.as_mut()`。它是`AsRef<T>`的可变（mutable）引用版本。
+
+对于一个类型为`T`的对象`foo`，如果`T`实现了`AsMut<U>`，那么，`foo`可执行`.as_mut()`操作，即`foo.as_mut()`。操作的结果，我们得到了一个类型为`&mut U`的可变（mutable）引用。
+
+注：在转换的过程中，`foo`会被可变（mutable）借用。
 
 ## Sized trait
 
