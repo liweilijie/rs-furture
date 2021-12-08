@@ -1,10 +1,15 @@
 # 常用的 Trait
  这里列举一些常用的`Trait`，积累在这里，以免随时查阅复习。
 
+[trait 常用](https://rustwiki.org/zh-CN/rust-by-example/conversion.html)
+
+Rust 使用`trait` 解决类型之间的转换问题，最一般的转换会用到 From 和 into 两个 trait, 也有特殊的情况比如用 String 转换到别的类型，以及把别的类型转换到 String 时。
+
 ## Deref && DerefMut
 实现 `Deref trait`允许我们重载 解引用运算符（dereference operator）*（与乘法运算符或通配符相区别）。
 
-看这个文档比较清晰[通过 Deref trait 将智能指针当作常规引用处理](https://kaisery.github.io/trpl-zh-cn/ch15-02-deref.html)
+- 看这个文档比较清晰[通过 Deref trait 将智能指针当作常规引用处理](https://kaisery.github.io/trpl-zh-cn/ch15-02-deref.html)
+- [Deref 设计者给它最神奇之处在于：强制隐式转换](https://rustcc.gitbooks.io/rustprimer/content/intoborrow/deref.html)
 
 ```rust
 use std::ops::Deref;
@@ -39,6 +44,112 @@ Rust 在发现类型和 Trait 实现满足三种情况时会进行 Deref 强制�
 - 当 `T: Deref<Target=U>` 时从`&T` 到`&U`
 - 当 `T: DerefMut<Target=U>` 时从`&mut T` 到 `&mut U`
 - 当 `T: Deref<Target=U>` 时从`&mut T` 到`&U`
+
+## From/Into && TryFrom/TryInto
+
+- [from/into](https://rustcc.gitbooks.io/rustprimer/content/intoborrow/into.html)
+- [示例](https://rustwiki.org/zh-CN/rust-by-example/conversion/from_into.html)
+
+Into trait 就是把 From trait 倒过来而已。也就是说，如果你为你的类型实现了 From，那么同时你也就免费获得了 Into。
+使用 Into trait 通常要求指明要转换到的类型，因为编译器大多数时候不能推断它。不过考虑到我们免费获得了 Into，这点代价不值一提。
+
+```rust
+// From
+let string = "hello".to_string();
+let other_string = String::from("hello");
+assert_eq!(string, other_string);
+
+// Into
+fn is_hello<T: Into<Vec<u8>>>(s: T) {
+  let bytes = b"hello".to_vec();
+  assert_eq!(bytes, s.into());
+}
+
+let s = "hello".to_string();
+is_hello(s);
+```
+
+下面拿一个实际生产中字符串作为函数参数的例子来说明。
+```rust
+struct Person {
+  name: String,
+}
+
+impl Person {
+  fn new<S: Into<String>>(name: S) -> Person {
+    Person{ name: name.into() }
+  }
+}
+
+fn main() {
+  let person = Person::new("Herman");
+  let person = Person::new("Herman".to_string());
+}
+```
+参数类型为 S， 是一个泛型参数，表示可以接受不同的类型。S: Into<String> 表示 S 类型必须实现了 Into<String>（约束）。而 &str 类型，符合这个要求。因此 &str 类型可以直接传进来。
+
+而 String 本身也是实现了 Into<String> 的。当然也可以直接传进来。
+
+然后，下面 name: name.into() 这里也挺神秘的。它的作用是将 name 转换成 String 类型的另一个对象。当 name 是 &str 时，它会转换成 String 对象，会做一次字符串的拷贝（内存的申请、复制）。而当 name 本身是 String 类型时，name.into() 不会做任何转换，代价为零（有没有恍然大悟）。
+
+```rust
+use std::convert::From;
+
+#[derive(Debug)]
+struct Number {
+  value: i32,
+}
+
+impl From<i32> for Number {
+  fn from(item: i32) -> Self {
+    Number { value: item }
+  }
+}
+
+fn main() {
+  let num = Number::from(30);
+  println!("My number is {:?}", num);
+
+  let int = 5;
+  let num: Number = int.into();
+  println!("My number is {:?}", num);
+}
+```
+
+## ToString/FromStr
+
+- [例子学习](https://rustwiki.org/zh-CN/rust-by-example/conversion/string.html)
+- [fromstr](https://runebook.dev/zh-CN/docs/rust/std/str/trait.fromstr)
+
+```rust
+use std::str::FromStr;
+use std::num::ParseIntError;
+
+#[derive(Debug, PartialEq)]
+struct Point {
+  x: i32,
+  y: i32
+}
+
+impl FromStr for Point {
+  type Err = ParseIntError;
+
+fn from_str(s: &str) -> Result<Self, Self::Err> {
+    let coords: Vec<&str> = s.trim_matches(|p| p == '(' || p == ')')
+                              .split(',')
+                              .collect();
+    let x_fromstr = coords[0].parse::<i32>()?;
+    let y_fromstr = coords[1].parse::<i32>()?;
+
+    Ok(Point{ x: x_fromstr, y: y_fromstr})
+  }
+}
+
+fn main() {
+  let p = Point::from_str("(1,2)");
+  assert_eq!(p.unwrap(), Point{x: 1, y: 2});
+}
+```
 
 ## AsRef && AsMut
 [AsRef 和 AsMut](https://wiki.jikexueyuan.com/project/rust-primer/intoborrow/asref.html)
@@ -207,7 +318,7 @@ mod tests {
   }
 }
  ```
- > Which basically just says if we have some impl AsRef<U> for T we also automatically get impl AsRef<U> for &T for all T for free.
+ > Which basically just says if we have some`impl AsRef<U> for T`we also automatically get`impl AsRef<U> for &T`for all `T` for free.
 
  这就是意味着我们有`impl AsRef<U> for T` 我们也自动免费获得`impl AsRef<U> for &T`
 
